@@ -18,15 +18,15 @@ const mysql=require('mysql2/promise')
 
 
 const pool = mysql.createPool({
-  host: '27.254.142.110',
+  host: 'localhost',
   user: 'root',
-  password: 'adminmysql',//adminmysql
+  password: '',//adminmysql
   database: 'khonkean_db',
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 100,
   maxIdle: 10, // max idle connections, the default value is the same as `connectionLimit`
   idleTimeout: 60000, // idle connections timeout, in milliseconds, the default value 60000
-  queueLimit: 0,
+  queueLimit: 100,
   enableKeepAlive: true,
   keepAliveInitialDelay: 0
 });

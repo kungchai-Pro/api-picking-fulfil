@@ -4,4 +4,6 @@ build/
 .env
 *.zip
 *.key
-*.pemcontroller/googledrive-keyapi.json
+*.pem
+controller/googledrive-keyapi.json
+.claude/settings.local.json

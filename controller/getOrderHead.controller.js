@@ -75,43 +75,81 @@ const getHeadjournal = async (req, res) => {
 
 // upload line order
 const getGetOrderLine = async (req, res) => {
+    try {
+        let dataLine = await fetchLine();
 
-    let dataLine = await fetchLine();
+        if (!dataLine || dataLine.length === 0) {
+            return res.json({ status: 200, error: false, statusload: 1, totalall: 0, totalNew: 0, totalDuplicate: 0, message: "No data from API" });
+        }
 
-    async function insertlineOrder(params) {
+        const normalize = (v) => (v ?? '').toString().trim();
+        const makeKey = (d) => [
+            normalize(d.SaleOnlineId),
+            normalize(d.OrderNumber),
+            normalize(d.ItemOnlineSKU),
+            normalize(d.ItemId),
+            normalize(d.ItemName),
+            Number(d.OrderQty || 0),
+            Number(d.ScanQty || 0),
+            normalize(d.Barcode),
+        ].join('|');
 
-        const values = params.map(d => [d.SaleOnlineId, d.OrderNumber, d.ItemOnlineSKU, d.ItemId, d.ItemName, d.OrderQty, d.ScanQty, d.Barcode, d.Create_date]);
-        const valuesitem = params.map(d => [d.ItemId, d.ItemName, d.Barcode, '']);
+        // ดึงเฉพาะ SaleOnlineId ที่มีใน API เพื่อ query DB แบบ selective
+        const uniqueSaleOnlineIds = [...new Set(dataLine.map(d => normalize(d.SaleOnlineId)))];
 
-        let [result] = await db.query(`select * from orderline where ScanQty > 0 AND OrderNumber in (${values.map(v => `'${v[1]}'`).join(',')})`)
-    
-        await db.query(`delete from orderline where OrderNumber in (${values.map(v => `'${v[1]}'`).join(',')})`)
+        // Query existing records เป็น batch ของ SaleOnlineId (ไม่ใช้ tuple IN ที่ช้าและมี limit)
+        const ID_BATCH = 500;
+        const existingSet = new Set();
 
-        //OrderlineId
-        await db.query(`INSERT INTO orderline(SaleOnlineId, OrderNumber, ItemOnlineSKU,ItemId, ItemName, OrderQty, ScanQty,Barcode,Create_date)
-         VALUES ? ON DUPLICATE KEY UPDATE OrderlineId=IF(ScanQty = VALUES(OrderQty),VALUES(OrderlineId),OrderlineId)`, [values]);
+        for (let i = 0; i < uniqueSaleOnlineIds.length; i += ID_BATCH) {
+            const batch = uniqueSaleOnlineIds.slice(i, i + ID_BATCH);
+            const [rows] = await db.query(
+                `SELECT SaleOnlineId, OrderNumber, ItemOnlineSKU, ItemId, ItemName, OrderQty, ScanQty, Barcode
+                 FROM orderline WHERE SaleOnlineId IN (?)`,
+                [batch]
+            );
+            for (const row of rows) {
+                existingSet.add(makeKey(row));
+            }
+        }
 
-        await db.query(`INSERT INTO inventtable(ItemId, ItemName, Barcode, Image) VALUES ?  ON DUPLICATE KEY UPDATE ItemId=VALUES(ItemId)`, [valuesitem]);
-        
-       await result.forEach(e => {
-            db.query(`UPDATE  orderline SET ScanQty='${e.ScanQty}' where SaleOnlineId='${e.SaleOnlineId}' 
-                and OrderNumber='${e.OrderNumber}' and ItemOnlineSKU='${e.ItemOnlineSKU}' and ItemId='${e.ItemId}' 
-                and OrderQty=${e.OrderQty} and Barcode='${e.Barcode}'`)
+        // กรองเฉพาะข้อมูลที่ยังไม่มีใน DB
+        const newData = dataLine.filter(d => !existingSet.has(makeKey(d)));
+        const duplicateCount = dataLine.length - newData.length;
+
+        console.log(`API total: ${dataLine.length} | Duplicate: ${duplicateCount} | New: ${newData.length}`);
+
+        // Insert เฉพาะข้อมูลใหม่เป็น chunk
+        if (newData.length > 0) {
+            const chunks = chunkArray(newData, 1000);
+            await Promise.all(
+                chunks.map(chunk => limit(async () => {
+                    const insertValues = chunk.map(d => [
+                        d.SaleOnlineId, d.OrderNumber, d.ItemOnlineSKU, d.ItemId,
+                        d.ItemName, d.OrderQty, d.ScanQty, d.Barcode, d.Create_date
+                    ]);
+                    await db.query(
+                        `INSERT INTO orderline(SaleOnlineId, OrderNumber, ItemOnlineSKU, ItemId, ItemName, OrderQty, ScanQty, Barcode, Create_date) VALUES ?`,
+                        [insertValues]
+                    );
+                    console.log(`Inserted chunk: ${chunk.length}`);
+                }))
+            );
+        }
+
+        console.log('DONE LINE ORDER ✅');
+        res.json({
+            status: 200, error: false, statusload: 1,
+            totalall: dataLine.length,
+            totalNew: newData.length,
+            totalDuplicate: duplicateCount,
+            message: "upload orderline successfull"
         });
- 
+    } catch (err) {
+        console.error('getGetOrderLine error:', err);
+        res.status(500).json({ status: 500, error: true, message: err.message });
     }
-
-    const chunksLine = chunkArray(dataLine, 1000);
-
-    await Promise.all(
-        chunksLine.map(chunk => limit(() => insertlineOrder(chunk)))
-    );
-
-    console.log('DONE LINE ORDER ✅');
-    res.json({ status: 200, error: false, statusload: 1, totalall: dataLine.length, message: "upload orderline successfull" })
-
 }
-
 
 
 const Pk_getOnlinejournalAll = (req, res) => {

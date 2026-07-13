@@ -3,7 +3,7 @@ const axios = require('axios');
 
 async function fetchLine() {
   const res = await axios.get('https://www.pppi-fulfil.com/services/erp/api/v1/erpstorecall/getOrderLine');
-  console.log('Fetched', res.data.listall.length, 'records');
+//   console.log('Fetched', res.data.listall.length, 'records');
     return res.data.listall.map(d => ({
     OrderlineId: d.ORDERLINEID,
     SaleOnlineId: d.SALESONLINEID,
